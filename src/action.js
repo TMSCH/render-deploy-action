@@ -8,22 +8,24 @@ const WAIT_FOR_SUCCESS =
 
 async function retrieveStatus(deployId) {
   const response = await fetch(
-    "https://api.render.com/v1/services/" + SERVICEID + "/deploys/" + deployId,
+    `https://api.render.com/v1/services/${SERVICEID}/deploys/${deployId}`,
     {
       headers: { Authorization: `Bearer ${APIKEY}` },
     },
   );
 
-  const data = await response.json();
   if (response.ok) {
+    const data = await response.json();
     return data.status;
   } else {
     throw Error("Could not retrieve deploy information.")
   }
 }
 
-async function waitForSuccess(data) {
-  let previousStatus = "";
+async function waitForSuccess(data, currentStatus) {
+  core.info(`Waiting for deploy to succeed`);
+
+  let previousStatus = currentStatus;
   while (true) {
     await new Promise((res) => {
       setTimeout(res, 10000);
@@ -32,7 +34,7 @@ async function waitForSuccess(data) {
     const status = await retrieveStatus(data.id);
 
     if (status !== previousStatus) {
-      core.info(`Deploy status: ${status}`);
+      core.info(`Deploy status changed: ${status}`);
       previousStatus = status;
     }
 
@@ -50,7 +52,7 @@ async function waitForSuccess(data) {
 
 async function run() {
   const response = await fetch(
-    "https://api.render.com/v1/services/" + SERVICEID + "/deploys",
+    `https://api.render.com/v1/services/${SERVICEID}/deploys`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${APIKEY}` },
@@ -71,10 +73,17 @@ async function run() {
     return;
   }
 
-  core.info(`Deploy ${data.status} - Commit: ${data.commit.message}`);
+  let ref = "unknown";
+  if (data.commit) {
+    ref = `git commit: ${data.commit.message}`;
+  } else if (data.image) {
+    ref = `image: ${data.image.ref} SHA: ${data.image.sha}`;
+  }
+  core.info(`Deploy triggered for ${ref}`);
+  core.info(`Status: ${data.status}`);
 
   if (WAIT_FOR_SUCCESS) {
-    await waitForSuccess(data);
+    await waitForSuccess(data, data.status);
   }
 }
 
