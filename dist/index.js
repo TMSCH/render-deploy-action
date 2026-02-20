@@ -8740,6 +8740,17 @@ const APIKEY = core.getInput("api-key") || process.env.APIKEY;
 const WAIT_FOR_SUCCESS =
   core.getInput("wait-for-success") || process.env.WAIT_FOR_SUCCESS;
 
+async function parseJsonResponse(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Render API returned non-JSON response (HTTP ${response.status}): ${text.slice(0, 200)}`,
+    );
+  }
+}
+
 async function retrieveStatus(deployId) {
   const response = await fetch(
     `https://api.render.com/v1/services/${SERVICEID}/deploys/${deployId}`,
@@ -8749,10 +8760,13 @@ async function retrieveStatus(deployId) {
   );
 
   if (response.ok) {
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     return data.status;
   } else {
-    throw Error("Could not retrieve deploy information.")
+    const text = await response.text();
+    throw new Error(
+      `Could not retrieve deploy information (HTTP ${response.status}): ${text.slice(0, 200)}`,
+    );
   }
 }
 
@@ -8793,19 +8807,20 @@ async function run() {
     },
   );
 
-  const data = await response.json();
-
   if (response.status === 401) {
     core.setFailed(
       "Render Deploy Action: Unauthorized. Please check your API key.",
     );
     return;
   } else if (!response.ok) {
+    const text = await response.text();
     core.setFailed(
-      `Deploy error: ${data.message} (status code ${response.status})`,
+      `Deploy error (HTTP ${response.status}): ${text.slice(0, 200)}`,
     );
     return;
   }
+
+  const data = await parseJsonResponse(response);
 
   let ref = "unknown";
   if (data.commit) {
