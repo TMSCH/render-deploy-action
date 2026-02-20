@@ -8740,8 +8740,13 @@ const APIKEY = core.getInput("api-key") || process.env.APIKEY;
 const WAIT_FOR_SUCCESS =
   core.getInput("wait-for-success") || process.env.WAIT_FOR_SUCCESS;
 
+const RENDER_HEADERS = { Authorization: `Bearer ${APIKEY}` };
+
 async function parseJsonResponse(response) {
   const text = await response.text();
+  if (!text.trim()) {
+    return null;
+  }
   try {
     return JSON.parse(text);
   } catch {
@@ -8751,12 +8756,30 @@ async function parseJsonResponse(response) {
   }
 }
 
+async function fetchLatestDeploy() {
+  const response = await fetch(
+    `https://api.render.com/v1/services/${SERVICEID}/deploys?limit=1`,
+    { headers: RENDER_HEADERS },
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(
+      `Could not list deploys (HTTP ${response.status}): ${text.slice(0, 200)}`,
+    );
+  }
+
+  const deploys = await parseJsonResponse(response);
+  if (!deploys || deploys.length === 0) {
+    throw new Error("No deploys found after triggering deploy");
+  }
+  return deploys[0];
+}
+
 async function retrieveStatus(deployId) {
   const response = await fetch(
     `https://api.render.com/v1/services/${SERVICEID}/deploys/${deployId}`,
-    {
-      headers: { Authorization: `Bearer ${APIKEY}` },
-    },
+    { headers: RENDER_HEADERS },
   );
 
   if (response.ok) {
@@ -8803,7 +8826,7 @@ async function run() {
     `https://api.render.com/v1/services/${SERVICEID}/deploys`,
     {
       method: "POST",
-      headers: { Authorization: `Bearer ${APIKEY}` },
+      headers: RENDER_HEADERS,
     },
   );
 
@@ -8820,7 +8843,16 @@ async function run() {
     return;
   }
 
-  const data = await parseJsonResponse(response);
+  let data = await parseJsonResponse(response);
+
+  // HTTP 202 (Accepted) may return an empty body — the deploy was queued but
+  // the response doesn't include deploy details. Poll the deploys list instead.
+  if (!data) {
+    core.info(
+      `Deploy accepted (HTTP ${response.status}) with empty body, fetching latest deploy...`,
+    );
+    data = await fetchLatestDeploy();
+  }
 
   let ref = "unknown";
   if (data.commit) {
